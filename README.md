@@ -1,6 +1,6 @@
 # AI-Powered Resume Processing System
 
-An intelligent, full-stack automated resume screening, extraction, and batch-processing system powered by Ollama LLM (`qwen2.5:1.5b`), FastAPI, Streamlit, and React (Vite + Tailwind CSS).
+An intelligent, full-stack automated resume screening, extraction, and batch-processing system powered by Groq Cloud LLM (`llama-3.3-70b-versatile`), FastAPI, Streamlit, and React (Vite + Tailwind CSS).
 
 ---
 
@@ -30,28 +30,23 @@ You have two user interface options to access and use the system:
 
 ---
 
-## 🛠️ Prerequisites & Status
+## 🛠️ Prerequisites & Environment Setup
 
 1. **Python Dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
-   *(Already installed & verified)*
 
-2. **Frontend Dependencies** (for React UI development):
-   ```bash
-   cd frontend
-   npm install
-   npm run build
-   ```
-   *(Already installed & built into `frontend/dist`)*
-
-3. **Ollama LLM**:
-   - Ensure Ollama is running (`ollama serve`)
-   - Ensure model is downloaded: `ollama pull qwen2.5:1.5b`
-   - Verified active on `http://localhost:11434`
+2. **Groq API Configuration**:
+   - Obtain a free API key from [https://console.groq.com/keys](https://console.groq.com/keys).
+   - Set environment variable in `.env` (for local development) or **Streamlit Secrets** (for Streamlit Community Cloud deployment):
+     ```ini
+     GROQ_API_KEY=your_groq_api_key_here
+     GROQ_MODEL=llama-3.3-70b-versatile
+     ```
 
 ---
+
 
 ## 📁 Key Files & Directories
 

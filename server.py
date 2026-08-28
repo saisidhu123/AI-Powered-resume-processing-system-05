@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from services.llm_service import check_ollama_status, extract_candidate_data, OLLAMA_MODEL, OLLAMA_URL
+from services.llm_service import check_llm_status, extract_candidate_data, GROQ_MODEL
 from services.resume_parser import parse_resume
 from services.excel_service import (
     read_excel_headers,
@@ -50,14 +50,15 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 @app.get("/api/status")
 def get_system_status():
-    """Check Ollama connectivity and return system info."""
-    is_online, status_msg, available_models = check_ollama_status()
+    """Check Groq Cloud LLM connectivity and return system info."""
+    is_online, status_msg, available_models = check_llm_status()
     return {
         "is_online": is_online,
         "status_msg": status_msg,
         "available_models": available_models,
-        "ollama_url": OLLAMA_URL,
-        "target_model": OLLAMA_MODEL
+        "llm_provider": "Groq Cloud API",
+        "target_model": GROQ_MODEL,
+        "ollama_url": "https://api.groq.com/openai/v1"
     }
 
 
@@ -88,9 +89,9 @@ async def process_single_resume(
     template: UploadFile = File(...)
 ):
     """Process a single resume against an Excel column template."""
-    is_online, status_msg, _ = check_ollama_status()
+    is_online, status_msg, _ = check_llm_status()
     if not is_online:
-        raise HTTPException(status_code=503, detail=f"Ollama offline: {status_msg}")
+        raise HTTPException(status_code=503, detail=f"LLM API offline: {status_msg}")
 
     # Save resume
     resume_path = os.path.join(UPLOAD_DIR, resume.filename)

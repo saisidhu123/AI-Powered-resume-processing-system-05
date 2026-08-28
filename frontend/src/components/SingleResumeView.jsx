@@ -58,7 +58,7 @@ export default function SingleResumeView({ systemStatus }) {
       return;
     }
     if (!systemStatus?.is_online) {
-      setError(`Ollama server offline: ${systemStatus?.status_msg || 'Cannot connect'}`);
+      setError(`Groq LLM offline: ${systemStatus?.status_msg || 'Cannot connect'}`);
       return;
     }
 
@@ -76,7 +76,7 @@ export default function SingleResumeView({ systemStatus }) {
     try {
       setTimeout(() => {
         setProgressPct(50);
-        setProgressStep('Step 2/4: AI Semantic Field Extraction via Ollama...');
+        setProgressStep('Step 2/4: AI Semantic Field Extraction via Groq Cloud LLM...');
       }, 800);
 
       setTimeout(() => {

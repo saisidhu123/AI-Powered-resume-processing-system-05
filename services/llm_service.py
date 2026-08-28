@@ -23,38 +23,133 @@ from services.field_extractor import (
     run_ai_candidate_screening
 )
 
-# Load environment variables
+# Load environment variables from .env if present
 load_dotenv()
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+def get_groq_api_key() -> str:
+    """Retrieve GROQ_API_KEY from environment variables or Streamlit Secrets."""
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+            return str(st.secrets["GROQ_API_KEY"]).strip()
+    except Exception:
+        pass
+    return ""
 
-def check_ollama_status() -> Tuple[bool, str, List[str]]:
+def get_groq_model() -> str:
+    """Retrieve GROQ_MODEL from environment variables or Streamlit Secrets."""
+    model = os.getenv("GROQ_MODEL", "").strip()
+    if model:
+        return model
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and "GROQ_MODEL" in st.secrets:
+            return str(st.secrets["GROQ_MODEL"]).strip()
+    except Exception:
+        pass
+    return "groq/compound-mini"
+
+GROQ_MODEL = get_groq_model()
+
+# Backwards compatibility constants
+OLLAMA_MODEL = GROQ_MODEL
+OLLAMA_URL = "https://api.groq.com/openai/v1"
+
+def check_llm_status() -> Tuple[bool, str, List[str]]:
     """
-    Check if Ollama server is accessible and retrieve available models.
+    Check if Groq Cloud LLM API key is valid and service is accessible.
     Returns (is_online, message, model_list).
     """
+    api_key = get_groq_api_key()
+    current_model = get_groq_model()
+    
+    if not api_key:
+        return False, "Groq API Key not found. Please set GROQ_API_KEY in .env or Streamlit Secrets.", []
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
     try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        response = requests.get("https://api.groq.com/openai/v1/models", headers=headers, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            models = [m.get("name", "") for m in data.get("models", [])]
-            if OLLAMA_MODEL in models or any(OLLAMA_MODEL in m for m in models):
-                return True, f"Ollama Online ({OLLAMA_MODEL} available)", models
-            else:
-                return False, f"Ollama Online, but model '{OLLAMA_MODEL}' was not found.", models
+            models = [m.get("id", "") for m in data.get("data", [])]
+            return True, f"Groq LLM Online ({current_model})", models
+        elif response.status_code == 401:
+            return False, "Invalid Groq API Key. Please verify GROQ_API_KEY.", []
         else:
-            return False, f"Ollama returned HTTP status {response.status_code}.", []
-    except requests.exceptions.ConnectionError:
-        return False, "Cannot connect to Ollama at http://localhost:11434. Please start Ollama.", []
+            return False, f"Groq API returned status {response.status_code}: {response.text}", []
+    except requests.exceptions.RequestException as e:
+        return False, f"Cannot connect to Groq API ({str(e)}). Check network connection.", []
     except Exception as e:
-        return False, f"Error checking Ollama status: {str(e)}", []
+        return False, f"Error checking Groq API status: {str(e)}", []
 
+def check_ollama_status() -> Tuple[bool, str, List[str]]:
+    """Backward compatibility wrapper for check_llm_status."""
+    return check_llm_status()
+
+def call_groq_llm(prompt: str, temperature: float = 0.0) -> Tuple[bool, str, str]:
+    """
+    Execute structured chat completion request against Groq API.
+    Returns (success, raw_text_response, error_message).
+    """
+    api_key = get_groq_api_key()
+    current_model = get_groq_model()
+
+    if not api_key:
+        return False, "", "GROQ_API_KEY is not configured."
+
+    # First try using official groq SDK if installed
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model=current_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=1024,
+            response_format={"type": "json_object"}
+        )
+        raw_text = response.choices[0].message.content or ""
+        return True, raw_text, ""
+    except ImportError:
+        pass
+    except Exception as sdk_err:
+        print(f"[Warning] Groq SDK call failed ({str(sdk_err)}). Falling back to direct HTTP REST request.")
+
+    # Fallback to direct requests HTTP POST
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": current_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": 1024,
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=60)
+        if res.status_code == 200:
+            res_json = res.json()
+            raw_text = res_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return True, raw_text, ""
+        else:
+            err_msg = f"Groq HTTP {res.status_code}: {res.text}"
+            return False, "", err_msg
+    except Exception as e:
+        return False, "", f"Groq API call exception: {str(e)}"
 
 def extract_candidate_data(resume_text: str, excel_headers: List[str]) -> Tuple[bool, Dict[str, Any], str, str]:
     """
     Processing Architecture:
-    Resume Text -> Text Cleanup & Word Reconstruction -> AI Analysis -> Experience Calculation -> Skills Normalization -> Mapping.
+    Resume Text -> Text Cleanup & Word Reconstruction -> Groq Cloud AI -> Experience Calculation -> Skills Normalization -> Mapping.
     Returns (success, candidate_dict, raw_response, error_message).
     """
     if not resume_text or not resume_text.strip():
@@ -90,30 +185,15 @@ RESUME TEXT:
 -------------------
 """
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {
-            "temperature": 0,
-            "num_predict": 1024
-        }
-    }
-
     raw_llm_text = ""
     extracted_dict = {}
 
-    try:
-        url = f"{OLLAMA_URL}/api/generate"
-        response = requests.post(url, json=payload, timeout=60)
+    success_llm, raw_llm_text, err_llm = call_groq_llm(prompt, temperature=0.0)
 
-        if response.status_code == 200:
-            res_json = response.json()
-            raw_llm_text = res_json.get("response", "")
-            extracted_dict = extract_json_from_response(raw_llm_text)
-    except Exception as e:
-        print(f"Warning: Ollama API call failed or timed out ({str(e)}). Using deterministic extraction fallback.")
+    if success_llm and raw_llm_text:
+        extracted_dict = extract_json_from_response(raw_llm_text)
+    else:
+        print(f"Warning: Groq Cloud LLM API call failed ({err_llm}). Using deterministic extraction fallback.")
 
     def classify_header_concept(header_str: str) -> str:
         """

@@ -15,7 +15,7 @@ export default function StatusBadge({ status, loading, onRefresh }) {
           onClick={onRefresh}
           disabled={loading}
           className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors disabled:opacity-50"
-          title="Refresh Ollama status"
+          title="Refresh Groq API status"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-sky-400' : ''}`} />
         </button>
@@ -28,7 +28,7 @@ export default function StatusBadge({ status, loading, onRefresh }) {
             <span className={`relative inline-flex rounded-full h-3 w-3 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
           </span>
           <span className={`text-xs font-semibold ${isOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isOnline ? status.status_msg : (status?.status_msg || 'Ollama Offline')}
+            {isOnline ? status.status_msg : (status?.status_msg || 'Groq LLM Offline')}
           </span>
         </div>
       </div>
@@ -39,13 +39,13 @@ export default function StatusBadge({ status, loading, onRefresh }) {
             <Cpu className="w-3.5 h-3.5" /> Model:
           </span>
           <span className="font-mono text-slate-300 font-medium bg-slate-800/80 px-2 py-0.5 rounded text-[11px]">
-            {status?.target_model || 'llama3.2:3b'}
+            {status?.target_model || 'llama-3.3-70b-versatile'}
           </span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-slate-500">Local URL:</span>
+          <span className="text-slate-500">Provider:</span>
           <span className="font-mono text-slate-400 text-[11px] truncate max-w-[160px]">
-            {status?.ollama_url || 'http://localhost:11434'}
+            {status?.llm_provider || 'Groq Cloud API'}
           </span>
         </div>
       </div>

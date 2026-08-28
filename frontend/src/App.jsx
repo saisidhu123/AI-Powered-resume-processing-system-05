@@ -19,9 +19,9 @@ export default function App() {
     } catch (err) {
       setSystemStatus({
         is_online: false,
-        status_msg: 'Backend or Ollama API unreachable',
-        target_model: 'llama3.2:3b',
-        ollama_url: 'http://localhost:11434'
+        status_msg: 'Groq Cloud LLM API unreachable',
+        target_model: 'llama-3.3-70b-versatile',
+        ollama_url: 'https://api.groq.com/openai/v1'
       });
     } finally {
       setLoadingStatus(false);
@@ -62,7 +62,7 @@ export default function App() {
                 </li>
                 <li className="flex items-start gap-2">
                   <Cpu className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <span><strong>AI Field Mapping:</strong> Dynamic schema extraction via local Ollama LLM.</span>
+                  <span><strong>AI Field Mapping:</strong> Dynamic schema extraction via Groq Cloud LLM.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <FileSpreadsheet className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -86,8 +86,8 @@ export default function App() {
       {/* Footer */}
       <footer className="mt-auto py-6 border-t border-slate-900 bg-slate-950/80 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>AI-Powered Resume Processing System • React + FastAPI + Ollama</span>
-          <span className="font-mono text-[11px] text-slate-600">100% Local & Offline Data Privacy</span>
+          <span>AI-Powered Resume Processing System • React + FastAPI + Groq Cloud LLM</span>
+          <span className="font-mono text-[11px] text-slate-600">Cloud-Native Streamlit Deployment</span>
         </div>
       </footer>
     </div>

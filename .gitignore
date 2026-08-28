@@ -6,8 +6,15 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
+# Secrets & Environment files
 .env
+.env.*
+*.env
+**/.env
+!.env.example
+.streamlit/secrets.toml
 
 # Node / React
 node_modules/

@@ -26,7 +26,7 @@ importlib.reload(services.llm_service)
 import services.batch_processor
 importlib.reload(services.batch_processor)
 
-from services.llm_service import check_ollama_status, extract_candidate_data, OLLAMA_MODEL, OLLAMA_URL
+from services.llm_service import check_llm_status, extract_candidate_data, GROQ_MODEL
 from services.resume_parser import parse_resume
 from services.excel_service import (
     read_excel_headers,
@@ -144,8 +144,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=64)
 st.sidebar.title("System Status")
 
-# Ollama connectivity check
-is_online, status_msg, available_models = check_ollama_status()
+# Groq Cloud LLM connectivity check
+is_online, status_msg, available_models = check_llm_status()
 
 if is_online:
     st.sidebar.markdown(f'<div class="status-badge-online">🟢 {status_msg}</div>', unsafe_allow_html=True)
@@ -154,7 +154,7 @@ else:
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Configuration")
-st.sidebar.info(f"**Local Ollama URL:** `{OLLAMA_URL}`\n\n**Target Model:** `{OLLAMA_MODEL}`")
+st.sidebar.info(f"**LLM Provider:** `Groq Cloud API`\n\n**Target Model:** `{GROQ_MODEL}`")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Capabilities")
@@ -517,7 +517,7 @@ else:
 
     if process_btn:
         if not is_online:
-            st.error(f"Cannot proceed: {status_msg}. Please ensure Ollama is running locally at {OLLAMA_URL}.")
+            st.error(f"Cannot proceed: {status_msg}. Please ensure GROQ_API_KEY is configured in Streamlit Secrets or .env file.")
             st.stop()
 
         if not uploaded_resume:
@@ -542,7 +542,7 @@ else:
                 st.error(f"Resume Parsing Error: {parse_err}")
                 st.stop()
 
-            status_text.text(f"🤖 Step 2/5: Processing resume with Ollama ({OLLAMA_MODEL})...")
+            status_text.text(f"🤖 Step 2/5: Processing resume with Groq Cloud LLM ({GROQ_MODEL})...")
             progress_bar.progress(45)
 
             llm_ok, candidate_data, raw_llm, llm_err = extract_candidate_data(resume_text, detected_headers)

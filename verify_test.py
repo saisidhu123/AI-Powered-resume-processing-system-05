@@ -7,9 +7,9 @@ from services.llm_service import extract_candidate_data, check_ollama_status
 from services.duplicate_detector import check_duplicate
 
 def run_test():
-    print("--- 1. Testing Ollama Status ---")
+    print("--- 1. Testing Groq LLM Status ---")
     online, msg, models = check_ollama_status()
-    print(f"Ollama Online: {online}, Message: {msg}")
+    print(f"Groq LLM Online: {online}, Message: {msg}")
 
     # Create dummy PDF resume
     sample_pdf_path = "uploads/test_resume.pdf"
