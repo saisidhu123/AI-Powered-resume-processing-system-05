@@ -57,8 +57,7 @@ def get_system_status():
         "status_msg": status_msg,
         "available_models": available_models,
         "llm_provider": "Groq Cloud API",
-        "target_model": GROQ_MODEL,
-        "ollama_url": "https://api.groq.com/openai/v1"
+        "target_model": GROQ_MODEL
     }
 
 

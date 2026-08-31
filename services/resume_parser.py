@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Tuple
 import fitz
 import docx
@@ -102,12 +103,31 @@ def parse_resume(file_path: str) -> Tuple[bool, str, str]:
         # DOC
         # =========================
         elif ext == ".doc":
+            # Attempt 1: Try reading with python-docx (in case it's a docx saved as .doc)
+            try:
+                text = extract_text_from_docx(file_path)
+                if text.strip():
+                    return True, text.strip(), ""
+            except Exception:
+                pass
+
+            # Attempt 2: Extract printable strings from binary .doc stream
+            try:
+                with open(file_path, "rb") as f:
+                    content = f.read()
+                words = re.findall(rb"[\x20-\x7E\x0A\x0D]{4,}", content)
+                extracted_lines = [w.decode("latin1", errors="ignore").strip() for w in words if len(w.decode("latin1", errors="ignore").strip()) > 3]
+                clean_lines = [line for line in extracted_lines if not any(line.startswith(p) for p in ["Root Entry", "WordDocument", "CompObj", "ObjectPool"])]
+                doc_text = "\n".join(clean_lines)
+                if len(doc_text.strip()) > 30:
+                    return True, doc_text.strip(), ""
+            except Exception:
+                pass
 
             return (
                 False,
                 "",
-                "Old .doc format is not supported. "
-                "Please save the resume as .docx or .pdf."
+                "Could not extract text from legacy .doc file. Please convert to .docx or .pdf."
             )
 
         # =========================

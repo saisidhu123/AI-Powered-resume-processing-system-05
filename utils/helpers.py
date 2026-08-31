@@ -4,12 +4,12 @@ from typing import Dict, Any, List
 
 def extract_json_from_response(text_response: str) -> Dict[str, Any]:
     """
-    Extract JSON object from Ollama response.
+    Extract JSON object from LLM response.
     Handles plain JSON, markdown, and extra text.
     """
 
     if not text_response or not text_response.strip():
-        print("[ERROR] Ollama response is EMPTY")
+        print("[ERROR] LLM response is EMPTY")
         return {}
 
     cleaned = text_response.strip()
@@ -27,11 +27,11 @@ def extract_json_from_response(text_response: str) -> Dict[str, Any]:
     end = cleaned.rfind("}")
 
     if start == -1:
-        print("[ERROR] No { found in Ollama response")
+        print("[ERROR] No { found in LLM response")
         return {}
 
     if end == -1 or end <= start:
-        print("[ERROR] No valid closing } found in Ollama response")
+        print("[ERROR] No valid closing } found in LLM response")
         return {}
 
     json_text = cleaned[start:end + 1].strip()

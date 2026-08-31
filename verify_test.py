@@ -3,12 +3,12 @@ import openpyxl
 import fitz # PyMuPDF
 from services.resume_parser import parse_resume
 from services.excel_service import read_excel_headers, populate_excel_template, read_existing_candidate_rows
-from services.llm_service import extract_candidate_data, check_ollama_status
+from services.llm_service import extract_candidate_data, check_llm_status
 from services.duplicate_detector import check_duplicate
 
 def run_test():
     print("--- 1. Testing Groq LLM Status ---")
-    online, msg, models = check_ollama_status()
+    online, msg, models = check_llm_status()
     print(f"Groq LLM Online: {online}, Message: {msg}")
 
     # Create dummy PDF resume
@@ -68,7 +68,7 @@ def run_test():
     print(f"Detected Headers: {read_hdrs}")
 
     # Test Step 3: LLM Extraction
-    print("--- 4. Extracting Data via Ollama Qwen ---")
+    print("--- 4. Extracting Data via Groq Cloud LLM ---")
     llm_ok, cand_data, raw_llm, llm_err = extract_candidate_data(resume_text, read_hdrs)
     assert llm_ok, f"LLM extraction failed: {llm_err}"
 

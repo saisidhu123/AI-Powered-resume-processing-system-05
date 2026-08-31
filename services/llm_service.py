@@ -27,36 +27,46 @@ from services.field_extractor import (
 load_dotenv()
 
 def get_groq_api_key() -> str:
-    """Retrieve GROQ_API_KEY from environment variables or Streamlit Secrets."""
-    key = os.getenv("GROQ_API_KEY", "").strip()
-    if key:
-        return key
+    """Retrieve GROQ_API_KEY securely from Streamlit Secrets or environment variables."""
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-            return str(st.secrets["GROQ_API_KEY"]).strip()
+            key = str(st.secrets["GROQ_API_KEY"]).strip()
+            if key:
+                return key
     except Exception:
         pass
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if key:
+        return key
     return ""
 
 def get_groq_model() -> str:
-    """Retrieve GROQ_MODEL from environment variables or Streamlit Secrets."""
-    model = os.getenv("GROQ_MODEL", "").strip()
-    if model:
-        return model
+    """Retrieve GROQ_MODEL securely from Streamlit Secrets or environment variables."""
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "GROQ_MODEL" in st.secrets:
-            return str(st.secrets["GROQ_MODEL"]).strip()
+            model = str(st.secrets["GROQ_MODEL"]).strip()
+            if model:
+                return model
     except Exception:
         pass
+    model = os.getenv("GROQ_MODEL", "").strip()
+    if model:
+        return model
     return "groq/compound-mini"
 
 GROQ_MODEL = get_groq_model()
 
-# Backwards compatibility constants
-OLLAMA_MODEL = GROQ_MODEL
-OLLAMA_URL = "https://api.groq.com/openai/v1"
+def sanitize_error_msg(err_msg: str, api_key: str = "") -> str:
+    """Sanitize error messages to ensure API keys are never exposed in UI or logs."""
+    if not err_msg:
+        return ""
+    if api_key:
+        err_msg = err_msg.replace(api_key, "[REDACTED_API_KEY]")
+    err_msg = re.sub(r"gsk_[a-zA-Z0-9_-]+", "[REDACTED_API_KEY]", err_msg)
+    err_msg = re.sub(r"Bearer\s+[a-zA-Z0-9_-]+", "Bearer [REDACTED_API_KEY]", err_msg, flags=re.IGNORECASE)
+    return err_msg
 
 def check_llm_status() -> Tuple[bool, str, List[str]]:
     """
@@ -67,7 +77,7 @@ def check_llm_status() -> Tuple[bool, str, List[str]]:
     current_model = get_groq_model()
     
     if not api_key:
-        return False, "Groq API Key not found. Please set GROQ_API_KEY in .env or Streamlit Secrets.", []
+        return False, "Groq API Key not found. Please set GROQ_API_KEY in Streamlit Secrets or .env.", []
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -80,16 +90,19 @@ def check_llm_status() -> Tuple[bool, str, List[str]]:
             models = [m.get("id", "") for m in data.get("data", [])]
             return True, f"Groq LLM Online ({current_model})", models
         elif response.status_code == 401:
-            return False, "Invalid Groq API Key. Please verify GROQ_API_KEY.", []
+            return False, "Invalid Groq API Key. Please verify GROQ_API_KEY in Streamlit Secrets.", []
         else:
-            return False, f"Groq API returned status {response.status_code}: {response.text}", []
+            clean_err = sanitize_error_msg(response.text, api_key)
+            return False, f"Groq API returned status {response.status_code}: {clean_err}", []
     except requests.exceptions.RequestException as e:
-        return False, f"Cannot connect to Groq API ({str(e)}). Check network connection.", []
+        clean_err = sanitize_error_msg(str(e), api_key)
+        return False, f"Cannot connect to Groq API ({clean_err}). Check network connection.", []
     except Exception as e:
-        return False, f"Error checking Groq API status: {str(e)}", []
+        clean_err = sanitize_error_msg(str(e), api_key)
+        return False, f"Error checking Groq API status: {clean_err}", []
 
 def check_ollama_status() -> Tuple[bool, str, List[str]]:
-    """Backward compatibility wrapper for check_llm_status."""
+    """Backward compatibility alias for check_llm_status."""
     return check_llm_status()
 
 def call_groq_llm(prompt: str, temperature: float = 0.0) -> Tuple[bool, str, str]:
@@ -141,10 +154,11 @@ def call_groq_llm(prompt: str, temperature: float = 0.0) -> Tuple[bool, str, str
             raw_text = res_json.get("choices", [{}])[0].get("message", {}).get("content", "")
             return True, raw_text, ""
         else:
-            err_msg = f"Groq HTTP {res.status_code}: {res.text}"
+            err_msg = sanitize_error_msg(f"Groq HTTP {res.status_code}: {res.text}", api_key)
             return False, "", err_msg
     except Exception as e:
-        return False, "", f"Groq API call exception: {str(e)}"
+        err_msg = sanitize_error_msg(f"Groq API call exception: {str(e)}", api_key)
+        return False, "", err_msg
 
 def extract_candidate_data(resume_text: str, excel_headers: List[str]) -> Tuple[bool, Dict[str, Any], str, str]:
     """

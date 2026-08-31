@@ -20,8 +20,8 @@ export default function App() {
       setSystemStatus({
         is_online: false,
         status_msg: 'Groq Cloud LLM API unreachable',
-        target_model: 'llama-3.3-70b-versatile',
-        ollama_url: 'https://api.groq.com/openai/v1'
+        target_model: 'groq/compound-mini',
+        llm_provider: 'Groq Cloud API'
       });
     } finally {
       setLoadingStatus(false);

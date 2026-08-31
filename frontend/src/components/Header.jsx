@@ -15,7 +15,7 @@ export default function Header({ mode, setMode }) {
                 AI Resume Processing System
               </h1>
               <p className="text-xs text-slate-400 font-medium mt-0.5">
-                Automated Candidate Screening, Parallel Bulk Engine & Dynamic Excel Export (100% Offline)
+                Automated Candidate Screening, Bulk Batch Processing & Dynamic Excel Export
               </p>
             </div>
           </div>

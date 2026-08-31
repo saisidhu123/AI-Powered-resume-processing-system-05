@@ -169,7 +169,7 @@ st.sidebar.markdown("""
 
 # --- MAIN INTERFACE ---
 st.markdown('<div class="main-header">AI-Powered Resume Processing System</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Automated Candidate Screening, Bulk Batch Processing & Dynamic Excel Export (100% Offline)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Automated Candidate Screening, Bulk Batch Processing & Dynamic Excel Export</div>', unsafe_allow_html=True)
 
 mode = st.radio(
     "Select Processing Mode:",
