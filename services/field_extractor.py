@@ -94,6 +94,9 @@ def clean_and_reconstruct_text(raw_text: str) -> str:
     for pat, repl in replacements:
         cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
 
+    # Repair PDF font conversion artifacts e.g. "I8 LPA" -> "₹8 LPA"
+    cleaned = re.sub(r"\bI(\d+(?:\.\d+)?\s*(?:LPA|Lakhs?|Lacs?|L|k|K|Crores?|Cr))\b", r"₹\1", cleaned)
+
     # Normalize multiple whitespace lines/spaces
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     return cleaned.strip()

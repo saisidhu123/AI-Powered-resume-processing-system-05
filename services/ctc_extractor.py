@@ -56,6 +56,7 @@ def clean_and_validate_ctc(val_str: str, source_segment: str = "", is_explicit_l
         return ""
 
     val_clean = val_str.strip().strip("|:;-,=/ ")
+    val_clean = re.sub(r"\bI(\d+(?:\.\d+)?\s*(?:LPA|Lakhs?|Lacs?|L|k|K|Crores?|Cr))\b", r"₹\1", val_clean, flags=re.IGNORECASE)
     val_lower = val_clean.lower()
     seg_lower = source_segment.lower() if source_segment else val_lower
 
