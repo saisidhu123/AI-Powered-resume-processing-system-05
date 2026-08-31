@@ -238,26 +238,13 @@ def extract_skills(resume_text: str) -> str:
     return ""
 
 
+from services.notice_period_extractor import extract_notice_period as deterministic_extract_notice_period
+
 def extract_notice_period(resume_text: str) -> str:
-    """Extract notice period / availability from resume text."""
+    """Extract notice period / availability from resume text using notice_period_extractor."""
     if not resume_text:
-        return ""
-    imm_pattern = r"\b(?:immediate\s+joiner|available\s+immediately|can\s+join\s+immediately|available\s+to\s+join\s+immediately|immediate)\b"
-    if re.search(imm_pattern, resume_text, re.IGNORECASE):
-        return "Immediate"
-    np_patterns = [
-        r"(?:notice\s+period|notice|availability)\s*[:\-]\s*([^\n\,\.]+)",
-        r"(\d+\s*(?:days?|months?|weeks?))\s*(?:notice|notice\s+period)",
-        r"(?:serving\s+notice\s+period\s*[\(\-]?\s*)([^\n\)\,\.]+)"
-    ]
-    for pat in np_patterns:
-        m = re.search(pat, resume_text, re.IGNORECASE)
-        if m:
-            val = m.group(1).strip()
-            if "immediate" in val.lower() or "0" in val:
-                return "Immediate"
-            return val.title()
-    return ""
+        return "Not Specified"
+    return deterministic_extract_notice_period(resume_text)
 
 
 def parse_month_year(date_str: str) -> Tuple[int, int]:

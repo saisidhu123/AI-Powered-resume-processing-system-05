@@ -11,7 +11,8 @@ from utils.helpers import (
     classify_experience
 )
 from services.experience_engine import evaluate_total_experience
-from services.ctc_extractor import extract_current_and_expected_ctc, sanitize_ctc_pair
+from services.ctc_extractor import extract_current_and_expected_ctc, sanitize_ctc_pair, clean_and_validate_ctc
+from services.notice_period_extractor import extract_notice_period, normalize_notice_period
 from services.field_extractor import (
     clean_and_reconstruct_text,
     calculate_experience_from_dates,
@@ -162,6 +163,146 @@ def call_groq_llm(prompt: str, temperature: float = 0.0) -> Tuple[bool, str, str
         err_msg = sanitize_error_msg(f"Groq API call exception: {str(e)}", api_key)
         return False, "", err_msg
 
+def classify_header_concept(header_str: str) -> str:
+    """
+    Map an arbitrary header name to its canonical semantic concept.
+    Strictly differentiates Expected CTC vs Current CTC vs Experience vs Location.
+    """
+    if not header_str:
+        return "UNKNOWN"
+    h = str(header_str).strip().lower().replace("_", " ").replace("-", " ").replace(".", " ")
+    h = re.sub(r"\s+", " ", h).strip()
+
+    # 1. Email (Check before address/location)
+    if "email" in h or "mail" in h:
+        return "EMAIL_ADDRESS"
+
+    # 2. LinkedIn (Check before link/url)
+    if "linkedin" in h:
+        return "LINKEDIN"
+
+    # 3. Expected CTC / Salary (Check before Experience and before Current CTC!)
+    if any(k in h for k in ["expected ctc", "exp ctc", "expected salary", "exp salary", "target ctc", "target salary", "desired ctc", "desired salary", "expected comp", "expected package", "expected remuneration"]):
+        return "EXPECTED_CTC"
+    if "expected" in h and any(c in h for c in ["ctc", "salary", "comp", "remuneration", "package", "lpa", "fixed"]):
+        return "EXPECTED_CTC"
+    if h.startswith("exp ") and any(c in h for c in ["ctc", "salary", "package", "comp"]):
+        return "EXPECTED_CTC"
+
+    # 4. Current CTC / Salary
+    if any(k in h for k in ["current ctc", "present ctc", "fixed ctc", "current salary", "present salary", "annual salary", "current comp", "present comp"]):
+        return "CURRENT_CTC"
+    if any(k in h for k in ["ctc", "salary", "compensation", "remuneration", "package"]) and not any(k in h for k in ["expected", "target", "desired"]):
+        return "CURRENT_CTC"
+
+    # 5. Experience Category / Level / Bucket
+    if any(k in h for k in ["exp level", "experience level", "experience category", "exp category", "experience bucket", "exp bucket"]):
+        return "EXP_BUCKET"
+
+    # 6. Skills (Check specific skills keywords before generic domain keywords)
+    if any(k in h for k in ["technical skill", "key skill", "skill", "competenc", "tools", "programming language"]):
+        return "SKILLS"
+
+    # 7. Technology Domain / Category / Tech Stack
+    if any(k in h for k in ["technology domain", "tech domain", "domain", "technology category", "tech category", "tech stack", "technology"]):
+        return "TECH_DOMAIN"
+
+    # 8. Relevant Experience (Check before Total Experience!)
+    if any(k in h for k in ["relevant experience", "relevant exp", "rel experience", "rel exp", "related experience"]):
+        return "RELEVANT_EXPERIENCE"
+    if "relevant" in h and any(k in h for k in ["exp", "experience", "work"]):
+        return "RELEVANT_EXPERIENCE"
+
+    # 9. Total Experience / Work Experience
+    if any(k in h for k in ["total experience", "total exp", "overall experience", "overall exp", "work experience", "total work experience", "years of experience", "years experience", "experience years", "experience duration"]):
+        return "TOTAL_EXPERIENCE"
+    if h in ["experience", "exp", "total experience (years)", "experience (years)", "exp (years)", "years of exp"]:
+        return "TOTAL_EXPERIENCE"
+    if "experience" in h and not any(k in h for k in ["relevant", "rel", "level", "category", "bucket"]):
+        return "TOTAL_EXPERIENCE"
+
+    # 10. Preferred Location (Check before Current Location!)
+    if any(k in h for k in ["preferred location", "pref location", "target location", "preferred city", "desired location", "relocation"]):
+        return "PREFERRED_LOCATION"
+
+    # 11. Current Location
+    if any(k in h for k in ["current location", "present location", "current city", "location", "city", "address", "based in", "residence"]):
+        return "CURRENT_LOCATION"
+
+    # 12. Candidate Name
+    if any(k in h for k in ["candidate name", "full name", "applicant name", "person name"]) or h in ["name", "candidate", "applicant"]:
+        return "CANDIDATE_NAME"
+
+    # 13. Mobile / Phone
+    if any(k in h for k in ["mobile", "phone", "contact number", "contact no", "cell"]) or h in ["contact"]:
+        return "MOBILE_NUMBER"
+
+    # 14. Notice Period / Availability
+    if any(k in h for k in ["notice", "availability", "joining"]):
+        return "NOTICE_PERIOD"
+
+    # 15. Education
+    if any(k in h for k in ["education", "qualification", "degree", "academic", "academics"]):
+        return "EDUCATION"
+
+    # 16. Certifications
+    if any(k in h for k in ["certif", "course", "certified"]):
+        return "CERTIFICATIONS"
+
+    # 17. Remarks
+    if any(k in h for k in ["remark", "comment", "note"]):
+        return "REMARKS"
+
+    return "UNKNOWN"
+
+
+def validate_candidate_dictionary(candidate_dict: Dict[str, Any], source_text: str) -> Dict[str, Any]:
+    """
+    FINAL VALIDATION LAYER:
+    Evaluates final candidate dictionary against strict cross-field independence rules:
+    - Current CTC contains no notice-period values or bare notice numbers.
+    - Current CTC contains no Expected CTC values.
+    - Expected CTC contains no Current CTC values.
+    - Notice Period contains no salary/CTC units.
+    - Total Experience contains no CTC, LPA, or phone numbers.
+    - Missing fields evaluate strictly to 'Not Specified' or 'Not specified'.
+    """
+    c_ctc = str(candidate_dict.get("Current CTC", "")).strip()
+    e_ctc = str(candidate_dict.get("Expected CTC", "")).strip()
+    np_val = str(candidate_dict.get("Notice Period", "")).strip()
+    exp_val = str(candidate_dict.get("Total Experience", "")).strip()
+
+    # 1. Sanitize CTC Pair
+    san_curr, san_exp = sanitize_ctc_pair(c_ctc, e_ctc, source_text)
+    candidate_dict["Current CTC"] = san_curr
+    candidate_dict["Expected CTC"] = san_exp
+
+    # 2. Sanitize Notice Period
+    if np_val and np_val.lower() not in ["not specified", "none", "null", ""]:
+        norm_np = normalize_notice_period(np_val)
+        candidate_dict["Notice Period"] = norm_np
+
+    # 3. Sanitize Total Experience against leakage
+    if exp_val:
+        exp_lower = exp_val.lower()
+        if any(k in exp_lower for k in ["lpa", "lakh", "ctc", "salary", "inr", "₹"]):
+            norm_e = evaluate_total_experience(source_text)
+            candidate_dict["Total Experience"] = norm_e.display_str
+
+    # 4. Standardize empty / missing string representations
+    for k in ["Current CTC", "Expected CTC"]:
+        v = str(candidate_dict.get(k, "")).strip()
+        if not v or v.lower() in ["none", "null", "", "n/a", "na"]:
+            candidate_dict[k] = "Not specified"
+
+    for k in ["Notice Period", "Total Experience"]:
+        v = str(candidate_dict.get(k, "")).strip()
+        if not v or v.lower() in ["none", "null", "", "n/a", "na"]:
+            candidate_dict[k] = "Not Specified"
+
+    return candidate_dict
+
+
 def extract_candidate_data(resume_text: str, excel_headers: List[str]) -> Tuple[bool, Dict[str, Any], str, str]:
     """
     Processing Architecture:
@@ -195,13 +336,18 @@ CRITICAL INSTRUCTIONS:
    - Do NOT guess mobile numbers, email addresses, notice period, CTC, or experience if not present.
    - NEVER infer total experience from phone numbers, CTC, LPA, notice period, graduation years, or software version numbers (e.g. Java 8, HTML5, Python 3.10).
 
-3. STRICT CTC SEPARATION RULE:
+3. STRICT FIELD INDEPENDENCE & CTC/NOTICE RULES:
+   - Extract current_ctc, expected_ctc, and notice_period independently.
    - "Current CTC" means ONLY present/current salary.
    - "Expected CTC" means ONLY expected/desired salary.
-   - If both appear on the same line (e.g. "Current CTC: 8 LPA | Expected CTC: 11 LPA"), extract them independently!
-   - Current CTC MUST NOT contain "Expected CTC" text, labels, or values.
-   - Expected CTC MUST NOT contain "Current CTC" text, labels, or values.
-   - Never copy lines containing both labels into either field.
+   - "Notice Period" means ONLY notice period or joining availability.
+   - NEVER infer current_ctc from expected_ctc.
+   - NEVER infer expected_ctc from current_ctc.
+   - NEVER infer current_ctc from notice_period.
+   - NEVER infer notice_period from CTC.
+   - If Current CTC is explicitly "Not Specified", "N/A", "Not disclosed", "Not mentioned", "Not provided", or missing, set Current CTC to "Not Specified".
+   - Expected CTC must NEVER be used as a fallback for Current CTC.
+   - Do NOT manufacture missing values. If a field is missing, set its value to "Not Specified".
 
 4. Output format: Respond ONLY with a valid JSON object matching the requested schema keys. Do not include markdown preamble or conversational text.
 
@@ -221,99 +367,8 @@ RESUME TEXT:
     else:
         print(f"Warning: Groq Cloud LLM API call failed ({err_llm}). Using deterministic extraction fallback.")
 
-    def classify_header_concept(header_str: str) -> str:
-        """
-        Map an arbitrary header name to its canonical semantic concept.
-        Strictly differentiates Expected CTC vs Current CTC vs Experience vs Location.
-        """
-        if not header_str:
-            return "UNKNOWN"
-        h = str(header_str).strip().lower().replace("_", " ").replace("-", " ").replace(".", " ")
-        h = re.sub(r"\s+", " ", h).strip()
-
-        # 1. Email (Check before address/location)
-        if "email" in h or "mail" in h:
-            return "EMAIL_ADDRESS"
-
-        # 2. LinkedIn (Check before link/url)
-        if "linkedin" in h:
-            return "LINKEDIN"
-
-        # 3. Expected CTC / Salary (Check before Experience and before Current CTC!)
-        if any(k in h for k in ["expected ctc", "exp ctc", "expected salary", "exp salary", "target ctc", "target salary", "desired ctc", "desired salary", "expected comp", "expected package", "expected remuneration"]):
-            return "EXPECTED_CTC"
-        if "expected" in h and any(c in h for c in ["ctc", "salary", "comp", "remuneration", "package", "lpa", "fixed"]):
-            return "EXPECTED_CTC"
-        if h.startswith("exp ") and any(c in h for c in ["ctc", "salary", "package", "comp"]):
-            return "EXPECTED_CTC"
-
-        # 4. Current CTC / Salary
-        if any(k in h for k in ["current ctc", "present ctc", "fixed ctc", "current salary", "present salary", "annual salary", "current comp", "present comp"]):
-            return "CURRENT_CTC"
-        if any(k in h for k in ["ctc", "salary", "compensation", "remuneration", "package"]) and not any(k in h for k in ["expected", "target", "desired"]):
-            return "CURRENT_CTC"
-
-        # 5. Experience Category / Level / Bucket
-        if any(k in h for k in ["exp level", "experience level", "experience category", "exp category", "experience bucket", "exp bucket"]):
-            return "EXP_BUCKET"
-
-        # 6. Skills (Check specific skills keywords before generic domain keywords)
-        if any(k in h for k in ["technical skill", "key skill", "skill", "competenc", "tools", "programming language"]):
-            return "SKILLS"
-
-        # 7. Technology Domain / Category / Tech Stack
-        if any(k in h for k in ["technology domain", "tech domain", "domain", "technology category", "tech category", "tech stack", "technology"]):
-            return "TECH_DOMAIN"
-
-        # 8. Relevant Experience (Check before Total Experience!)
-        if any(k in h for k in ["relevant experience", "relevant exp", "rel experience", "rel exp", "related experience"]):
-            return "RELEVANT_EXPERIENCE"
-        if "relevant" in h and any(k in h for k in ["exp", "experience", "work"]):
-            return "RELEVANT_EXPERIENCE"
-
-        # 9. Total Experience / Work Experience
-        if any(k in h for k in ["total experience", "total exp", "overall experience", "overall exp", "work experience", "total work experience", "years of experience", "years experience", "experience years", "experience duration"]):
-            return "TOTAL_EXPERIENCE"
-        if h in ["experience", "exp", "total experience (years)", "experience (years)", "exp (years)", "years of exp"]:
-            return "TOTAL_EXPERIENCE"
-        if "experience" in h and not any(k in h for k in ["relevant", "rel", "level", "category", "bucket"]):
-            return "TOTAL_EXPERIENCE"
-
-        # 10. Preferred Location (Check before Current Location!)
-        if any(k in h for k in ["preferred location", "pref location", "target location", "preferred city", "desired location", "relocation"]):
-            return "PREFERRED_LOCATION"
-
-        # 11. Current Location
-        if any(k in h for k in ["current location", "present location", "current city", "location", "city", "address", "based in", "residence"]):
-            return "CURRENT_LOCATION"
-
-        # 12. Candidate Name
-        if any(k in h for k in ["candidate name", "full name", "applicant name", "person name"]) or h in ["name", "candidate", "applicant"]:
-            return "CANDIDATE_NAME"
-
-        # 13. Mobile / Phone
-        if any(k in h for k in ["mobile", "phone", "contact number", "contact no", "cell"]) or h in ["contact"]:
-            return "MOBILE_NUMBER"
-
-        # 14. Notice Period / Availability
-        if any(k in h for k in ["notice", "availability", "joining"]):
-            return "NOTICE_PERIOD"
-
-        # 15. Education
-        if any(k in h for k in ["education", "qualification", "degree", "academic", "academics"]):
-            return "EDUCATION"
-
-        # 16. Certifications
-        if any(k in h for k in ["certif", "course", "certified"]):
-            return "CERTIFICATIONS"
-
-        # 17. Remarks
-        if any(k in h for k in ["remark", "comment", "note"]):
-            return "REMARKS"
-
-        return "UNKNOWN"
-
     # Step 3: Populate final_dict using Header Concept Mapping
+    final_dict = {}
     final_dict = {}
     for excel_header in excel_headers:
         concept = classify_header_concept(excel_header)
@@ -324,8 +379,13 @@ RESUME TEXT:
                 if v and (k.strip().lower() == excel_header.strip().lower() or classify_header_concept(k) == concept):
                     val_str = str(v).strip()
                     if val_str.lower() not in ["none", "null", "n/a", "na"]:
-                        found_val = val_str
-                        break
+                        if concept in ["CURRENT_CTC", "EXPECTED_CTC"]:
+                            val_str = clean_and_validate_ctc(val_str, source_segment=cleaned_text)
+                        elif concept == "NOTICE_PERIOD":
+                            val_str = normalize_notice_period(val_str)
+                        if val_str and val_str.strip().lower() not in ["not specified", "none", "null", ""]:
+                            found_val = val_str
+                            break
 
         if not found_val:
             if concept == "CANDIDATE_NAME":
@@ -389,15 +449,24 @@ RESUME TEXT:
 
         final_dict[excel_header] = found_val
 
-    # Step 3.5: Sanitize CTC pair to ensure Current CTC and Expected CTC are strictly independent
+    # Step 3.5: Sanitize Notice Period & CTC pair to ensure fields are strictly independent
+    np_hdr = None
     curr_ctc_hdr = None
     exp_ctc_hdr = None
     for h in excel_headers:
         c_concept = classify_header_concept(h)
-        if c_concept == "CURRENT_CTC":
+        if c_concept == "NOTICE_PERIOD":
+            np_hdr = h
+        elif c_concept == "CURRENT_CTC":
             curr_ctc_hdr = h
         elif c_concept == "EXPECTED_CTC":
             exp_ctc_hdr = h
+
+    det_np = extract_notice_period(cleaned_text)
+    if np_hdr:
+        llm_np = final_dict.get(np_hdr, "")
+        if det_np != "Not Specified" or not llm_np or llm_np.lower() in ["not specified", "none", "null", "n/a", ""]:
+            final_dict[np_hdr] = det_np
 
     c_val = final_dict.get(curr_ctc_hdr, "") if curr_ctc_hdr else fallback_data.get("Current CTC", "")
     e_val = final_dict.get(exp_ctc_hdr, "") if exp_ctc_hdr else fallback_data.get("Expected CTC", "")
@@ -445,9 +514,15 @@ RESUME TEXT:
         elif c_concept == "EXP_BUCKET" and not final_dict[header]:
             final_dict[header] = exp_bucket
 
-    # Always ensure Technology Domain key is present
-    if "Technology Domain" not in final_dict or not final_dict["Technology Domain"]:
-        final_dict["Technology Domain"] = tech_domain_str
+    # Step 7: Final Validation Layer (Cross-Field Independence & Rejection Guardrails)
+    c_ctc = final_dict.get("Current CTC", "")
+    e_ctc = final_dict.get("Expected CTC", "")
+    san_curr, san_exp = sanitize_ctc_pair(c_ctc, e_ctc, cleaned_text)
+    final_dict["Current CTC"] = san_curr
+    final_dict["Expected CTC"] = san_exp
+
+    if final_dict.get("Notice Period"):
+        final_dict["Notice Period"] = normalize_notice_period(final_dict["Notice Period"])
 
     # Attach Debugging & Confidence Metadata
     final_dict["_raw_text"] = resume_text

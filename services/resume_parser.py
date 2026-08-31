@@ -77,7 +77,9 @@ def parse_resume(file_path: str) -> Tuple[bool, str, str]:
                     "PDF contains no readable text."
                 )
 
-            return True, text.strip(), ""
+            from services.document_reader import build_resume_document
+            doc_obj = build_resume_document(file_path, text)
+            return True, doc_obj.full_text, ""
 
         # =========================
         # DOCX

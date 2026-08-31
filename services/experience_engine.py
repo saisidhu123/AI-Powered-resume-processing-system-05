@@ -132,19 +132,20 @@ def segment_resume_sections(resume_text: str) -> Dict[str, str]:
     for line in lines:
         ll = line.lower().strip().rstrip(":")
         
-        # Check section boundaries
-        if any(ll == h or ll.startswith(h + ":") for h in work_headers):
-            current_section = "work_experience"
-            continue
-        elif any(ll == h or ll.startswith(h + ":") for h in edu_headers):
-            current_section = "education"
-            continue
-        elif any(ll == h or ll.startswith(h + ":") for h in skill_headers):
-            current_section = "skills"
-            continue
-        elif any(ll == h or ll.startswith(h + ":") for h in personal_headers):
-            current_section = "personal_info"
-            continue
+        # Section headers should be standalone headings without numeric values
+        if not re.search(r"\d", line):
+            if any(ll == h or ll == h + ":" for h in work_headers):
+                current_section = "work_experience"
+                continue
+            elif any(ll == h or ll == h + ":" for h in edu_headers):
+                current_section = "education"
+                continue
+            elif any(ll == h or ll == h + ":" for h in skill_headers):
+                current_section = "skills"
+                continue
+            elif any(ll == h or ll == h + ":" for h in personal_headers):
+                current_section = "personal_info"
+                continue
 
         sections[current_section].append(line)
 
@@ -171,93 +172,154 @@ def extract_explicit_experience(resume_text: str) -> Optional[NormalizedExperien
         # Explicit labeled statements (e.g. "Total Experience: 5 Years", "Overall Experience - 3.5 yrs", "Work Experience = 6 yrs")
         r"(?:total|overall|professional|work|career)?\s*(?:experience|exp\.?)\s*[:\=\-]\s*(\d+(?:\.\d+)?\s*(?:\+)?\s*(?:years?|yrs?|months?|mos?)(?:\s*(?:and|&)?\s*\d+\s*(?:months?|mos?))?)",
         # Years + Months combinations e.g. "3 years 6 months", "7 years 4 months", "3 yrs 6 mos", "2 years and 4 months"
-        r"\b(\d+)\s*(?:years?|yrs?)\s*(?:and|&)?\s*(\d+)\s*(?:months?|mos?)\b(?:\s*(?:of|in)?\s*(?:professional|work|industry|domain|software|tech|engineering)?\s*experience)?",
-        # Decimal or Integer Years with modifiers e.g. "over 5 years", "more than 5.5 years", "5+ years of experience", "around 5 years", "nearly 6 years"
-        r"\b(?:over|more\s+than|approx\.?|approximately|around|nearly|with|having)?\s*(\d+(?:\.\d+)?\s*(?:\+)?)\s*(?:years?|yrs?)\s*(?:of|in)?\s*(?:professional|work|industry|domain|software|tech|engineering|relevant|hands\-on)?\s*experience\b",
+        r"\b(\d+)\s*(?:years?|yrs?)\s*(?:and|&)?\s*(\d+)\s*(?:months?|mos?)\b(?:\s*(?:of|in)?\s*(?:professional|work|industry|domain|software|tech|engineering)?\s*(?:experience|exp\.?))?",
+        # Decimal or Integer Years with Exp/Experience e.g. "5 Years Exp", "5+ years of experience", "5 yrs exp", "around 5 years"
+        r"\b(?:over|more\s+than|approx\.?|approximately|around|nearly|with|having)?\s*(\d+(?:\.\d+)?\s*(?:\+)?)\s*(?:years?|yrs?)\s*(?:of|in)?\s*(?:professional|work|industry|domain|software|tech|engineering|relevant|hands\-on)?\s*(?:experience|exp\.?)\b",
         # Explicit years in domain/field e.g. "Nearly 6 years in backend development", "5 years in Python"
         r"\b(?:over|more\s+than|approx\.?|approximately|around|nearly|with|having)?\s*(\d+(?:\.\d+)?\s*(?:\+)?)\s*(?:years?|yrs?)\s+(?:of|in)\s+[a-zA-Z0-9\s\-\/]{2,30}\b",
         # Stated months e.g. "18 months of experience", "10 months experience", "6 months experience"
-        r"\b(\d+)\s*(?:months?|mos?)\s*(?:of|in)?\s*(?:professional|work|industry|domain|software|tech|engineering)?\s*experience\b",
+        r"\b(\d+)\s*(?:months?|mos?)\s*(?:of|in)?\s*(?:professional|work|industry|domain|software|tech|engineering)?\s*(?:experience|exp\.?)\b",
         # Role with experience e.g. "Experienced professional with 8 years", "Developer with 4.5 yrs"
         r"\b(?:engineer|developer|architect|consultant|manager|lead|analyst|professional)\s+(?:with|having)\s+(\d+(?:\.\d+)?\s*(?:\+)?)\s*(?:years?|yrs?)\b"
     ]
 
-    for line in lines[:40]:  # Inspect top 40 header/summary lines
-        line_clean = line.strip()
-        line_lower = line_clean.lower()
-
-        # Context Rejection Checks:
-        # Ignore if line contains Age ("28 years old"), CTC/LPA, Notice Period, Phone, Email, Education graduation, Version numbers, Project duration
-        if any(k in line_lower for k in ["years old", "yrs old", "age:", "ctc", "lpa", "salary", "lakh", "lac", "inr", "$", "notice period", "phone", "mobile", "contact", "@", "graduated", "gpa", "marks", "project duration", "college project"]):
-            continue
-
-        # Reject software version context e.g. "Java 8", "HTML 5", "Python 3.10", "Windows 11", ".NET 6", "Angular 14"
-        if re.search(r"\b(?:java|python|html|css|windows|sql|angular|react|node|\.net|version)\s*\d", line_lower):
-            if "experience" not in line_lower:
-                continue
-
-        for pat in explicit_patterns:
-            m = re.search(pat, line_clean, re.IGNORECASE)
-            if m:
-                groups = m.groups()
-                
-                # Case 1: Years + Months combination e.g. ("3", "6")
-                if len(groups) == 2 and groups[0] and groups[1] and groups[0].isdigit() and groups[1].isdigit():
-                    yrs = float(groups[0])
-                    mos = float(groups[1])
-                    total_yrs = round(yrs + (mos / 12.0), 1)
-                    tot_mos = int(yrs * 12 + mos)
-                    display = format_experience_display(total_yrs, raw_explicit_match=f"{groups[0]} Years {groups[1]} Months")
-                    return NormalizedExperience(
-                        display_str=display,
-                        numeric_years=total_yrs,
-                        numeric_months=tot_mos,
-                        source="explicit_resume_statement",
-                        confidence=95.0,
-                        notes=f"Explicit years + months statement extracted: '{m.group(0)}'",
-                        explicit_val=display
-                    )
-
-                # Case 2: Single matched term
-                val_str = groups[0].strip() if groups else m.group(0).strip()
-                
-                # Check if it's months e.g. "18 months", "6 months"
-                if re.search(r"\b(?:months?|mos?)\b", m.group(0), re.IGNORECASE):
-                    digits = re.findall(r"\d+(?:\.\d+)?", val_str)
-                    if digits:
-                        mos = float(digits[0])
-                        if 1 <= mos <= 600:
-                            total_yrs = round(mos / 12.0, 1)
-                            tot_mos = int(mos)
-                            display = format_experience_display(total_yrs)
+    # Pass 0: Table Layout Inspection (Header row: "... | Experience | ...", Value row: "... | 4 Years | ...")
+    for i in range(min(len(lines) - 1, 10)):
+        h_line = lines[i].strip()
+        v_line = lines[i + 1].strip()
+        if "|" in h_line and "|" in v_line:
+            h_cols = [c.strip().lower() for c in h_line.split("|")]
+            v_cols = [c.strip() for c in v_line.split("|")]
+            for idx, col_hdr in enumerate(h_cols):
+                if "exp" in col_hdr or "experience" in col_hdr:
+                    if idx < len(v_cols):
+                        val_cell = v_cols[idx]
+                        m_digits = re.search(r"\b(\d+(?:\.\d+)?\s*(?:\+)?)\s*(?:years?|yrs?|months?|mos?)\b", val_cell, re.IGNORECASE)
+                        if m_digits:
+                            num_str = m_digits.group(1)
+                            yrs = float(num_str.replace("+", ""))
+                            display = format_experience_display(yrs, modifier="+" if "+" in num_str else "")
                             return NormalizedExperience(
                                 display_str=display,
-                                numeric_years=total_yrs,
-                                numeric_months=tot_mos,
+                                numeric_years=yrs,
+                                numeric_months=int(round(yrs * 12)),
                                 source="explicit_resume_statement",
                                 confidence=95.0,
-                                notes=f"Explicit months statement extracted: '{m.group(0)}'",
+                                notes=f"Table experience column extracted: '{val_cell}'",
                                 explicit_val=display
                             )
 
-                # Case 3: Years e.g. "5+", "5.5", "8"
-                digits = re.findall(r"\d+(?:\.\d+)?", val_str)
-                if digits:
-                    yrs = float(digits[0])
-                    if 0.1 <= yrs <= 60.0:
-                        has_over_modifier = bool(re.search(r"\b(?:over|more\s+than|plus)\b", line_lower))
-                        modifier = "+" if "+" in val_str or "+" in m.group(0) or has_over_modifier else ""
-                        display = format_experience_display(yrs, modifier=modifier, raw_explicit_match=val_str)
-                        tot_mos = int(round(yrs * 12))
+    for i, line in enumerate(lines[:40]):  # Inspect top 40 header/summary lines
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+
+        target_line = line_clean
+        if i + 1 < len(lines):
+            next_l = lines[i + 1].strip()
+            if (any(k in line_clean.lower() for k in ["experience", "exp", "work experience", "total experience"]) and
+                not re.search(r"\d", line_clean) and re.search(r"\d", next_l)):
+                target_line = line_clean + " " + next_l
+
+        # Split table rows / multi-field lines into independent cell segments
+        segments = [s.strip() for s in re.split(r"[\|;\n]", target_line) if s.strip()]
+
+        for seg in segments:
+            seg_lower = seg.lower()
+            for pat in explicit_patterns:
+                m = re.search(pat, seg, re.IGNORECASE)
+                if m:
+                    match_str = m.group(0).lower()
+
+                    # Context Rejection Checks on match window:
+                    # Ignore if match window contains Age ("28 years old"), CTC/LPA, Phone, Email, Education graduation, Project duration
+                    if any(k in match_str for k in ["years old", "yrs old", "age:", "ctc", "lpa", "salary", "lakh", "lac", "inr", "$", "phone", "mobile", "contact", "@", "graduated", "gpa", "marks"]):
+                        continue
+
+                    # Reject software version context e.g. "Java 8", "HTML 5", "Python 3.10", "Windows 11", ".NET 6", "Angular 14"
+                    if re.search(r"\b(?:java|python|html|css|windows|sql|angular|react|node|\.net|version)\s*\d", seg.lower()):
+                        if "experience" not in seg.lower():
+                            continue
+
+            for pat in explicit_patterns:
+                m = re.search(pat, seg, re.IGNORECASE)
+                if m:
+                    groups = m.groups()
+                    
+                    # Case 1: Years + Months combination e.g. ("3", "6")
+                    if len(groups) == 2 and groups[0] and groups[1] and groups[0].isdigit() and groups[1].isdigit():
+                        yrs = float(groups[0])
+                        mos = float(groups[1])
+                        total_yrs = round(yrs + (mos / 12.0), 1)
+                        tot_mos = int(yrs * 12 + mos)
+                        display = format_experience_display(total_yrs, raw_explicit_match=f"{groups[0]} Years {groups[1]} Months")
                         return NormalizedExperience(
                             display_str=display,
-                            numeric_years=yrs,
+                            numeric_years=total_yrs,
                             numeric_months=tot_mos,
                             source="explicit_resume_statement",
                             confidence=95.0,
-                            notes=f"Explicit professional experience statement extracted: '{m.group(0)}'",
+                            notes=f"Explicit years + months statement extracted: '{m.group(0)}'",
                             explicit_val=display
                         )
+
+                    # Check for explicit Years + Months combination e.g. "3 years 6 months", "7 years 4 months"
+                    m_ym = re.search(r"\b(\d+)\s*(?:years?|yrs?)\s*(?:and|&)?\s*(\d+)\s*(?:months?|mos?)\b", seg, re.IGNORECASE)
+                    if m_ym:
+                        yrs = float(m_ym.group(1))
+                        mos = float(m_ym.group(2))
+                        total_yrs = round(yrs + (mos / 12.0), 1)
+                        tot_mos = int(yrs * 12 + mos)
+                        display = format_experience_display(total_yrs, raw_explicit_match=m_ym.group(0))
+                        return NormalizedExperience(
+                            display_str=display,
+                            numeric_years=total_yrs,
+                            numeric_months=tot_mos,
+                            source="explicit_resume_statement",
+                            confidence=95.0,
+                            notes=f"Explicit years + months statement extracted: '{m_ym.group(0)}'",
+                            explicit_val=display
+                        )
+
+                    val_str = groups[0].strip() if groups else m.group(0).strip()
+
+                    # Check if it's months only e.g. "18 months", "6 months"
+                    if re.search(r"\b(?:months?|mos?)\b", seg, re.IGNORECASE) and not re.search(r"\b(?:years?|yrs?)\b", seg, re.IGNORECASE):
+                        digits = re.findall(r"\d+(?:\.\d+)?", val_str)
+                        if digits:
+                            mos = float(digits[0])
+                            if 1 <= mos <= 600:
+                                total_yrs = round(mos / 12.0, 1)
+                                tot_mos = int(mos)
+                                display = format_experience_display(total_yrs)
+                                return NormalizedExperience(
+                                    display_str=display,
+                                    numeric_years=total_yrs,
+                                    numeric_months=tot_mos,
+                                    source="explicit_resume_statement",
+                                    confidence=95.0,
+                                    notes=f"Explicit months statement extracted: '{m.group(0)}'",
+                                    explicit_val=display
+                                )
+
+                    # Case 3: Years e.g. "5+", "5.5", "8"
+                    digits = re.findall(r"\d+(?:\.\d+)?", val_str)
+                    if digits:
+                        yrs = float(digits[0])
+                        if 0.1 <= yrs <= 60.0:
+                            has_over_modifier = bool(re.search(r"\b(?:over|more\s+than|plus)\b", seg_lower))
+                            modifier = "+" if "+" in val_str or "+" in m.group(0) or has_over_modifier else ""
+                            display = format_experience_display(yrs, modifier=modifier, raw_explicit_match=val_str)
+                            tot_mos = int(round(yrs * 12))
+                            return NormalizedExperience(
+                                display_str=display,
+                                numeric_years=yrs,
+                                numeric_months=tot_mos,
+                                source="explicit_resume_statement",
+                                confidence=95.0,
+                                notes=f"Explicit professional experience statement extracted: '{m.group(0)}'",
+                                explicit_val=display
+                            )
 
     return None
 
@@ -465,11 +527,17 @@ def detect_fresher(resume_text: str) -> Optional[NormalizedExperience]:
     fresher_indicators = [
         r"\bfresher\b",
         r"\bfresh\s+graduate\b",
-        r"\brecent\s+graduate\b",
+        r"\brecent(?:\s+\w+)?\s+graduate\b",
+        r"\bfirst\s+opportunity\b",
+        r"\bfirst\s+role\b",
+        r"\bfirst\s+job\b",
         r"\bno\s+work\s+experience\b",
         r"\bno\s+professional\s+experience\b",
+        r"\bno\s+full\-time\s+experience\b",
+        r"\binternship\s+only\b",
         r"\bentry\s*\-?\s*level\s+candidate\b",
         r"\bentry\s*\-?\s*level\s+software\b",
+        r"\bentry\s*\-?\s*level\b",
         r"\bseeking\s+(?:an?\s+)?entry\s*\-?\s*level\b"
     ]
 
