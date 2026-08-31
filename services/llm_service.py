@@ -10,6 +10,7 @@ from utils.helpers import (
     classify_technology,
     classify_experience
 )
+from services.experience_engine import evaluate_total_experience
 from services.field_extractor import (
     clean_and_reconstruct_text,
     calculate_experience_from_dates,
@@ -172,9 +173,10 @@ def extract_candidate_data(resume_text: str, excel_headers: List[str]) -> Tuple[
     # Step 1: Text Cleanup & Word Reconstruction
     cleaned_text = clean_and_reconstruct_text(resume_text)
 
-    # Step 2: Pre-extract deterministic fallbacks & calculated experience
+    # Step 2: Pre-extract deterministic fallbacks & generic experience evaluation
     fallback_data = extract_all_fields_fallback(cleaned_text)
-    calc_exp, exp_conf, exp_notes = calculate_experience_from_dates(cleaned_text)
+    norm_exp = evaluate_total_experience(cleaned_text)
+    calc_exp, exp_conf, exp_notes = norm_exp.display_str, norm_exp.confidence, norm_exp.notes
 
     # Build exact JSON template schema for the prompt
     schema = {header: "" for header in excel_headers}
@@ -190,6 +192,7 @@ CRITICAL INSTRUCTIONS:
 2. ABSOLUTE ACCURACY RULE: NEVER invent, hallucinate, or guess candidate details.
    - If a requested field is NOT explicitly mentioned or available in the resume, set its value to "".
    - Do NOT guess mobile numbers, email addresses, notice period, CTC, or experience if not present.
+   - NEVER infer total experience from phone numbers, CTC, LPA, notice period, graduation years, or software version numbers (e.g. Java 8, HTML5, Python 3.10).
 
 3. Output format: Respond ONLY with a valid JSON object matching the requested schema keys. Do not include markdown preamble or conversational text.
 
@@ -301,25 +304,20 @@ RESUME TEXT:
 
         return "UNKNOWN"
 
-    # Step 3: Map LLM output & Fallback Data to Excel headers using concept mapping
-    final_dict = {header: "" for header in excel_headers}
-
+    # Step 3: Populate final_dict using Header Concept Mapping
+    final_dict = {}
     for excel_header in excel_headers:
         concept = classify_header_concept(excel_header)
         found_val = ""
 
-        # 1. Exact or Concept match in LLM output
-        for llm_key, value in extracted_dict.items():
-            if value is not None and str(value).strip():
-                val_str = str(value).strip()
-                if val_str.lower() in ["none", "null", "n/a", "na"]:
-                    continue
-                # Match by exact header name or matching concept
-                if llm_key.strip().lower() == excel_header.strip().lower() or classify_header_concept(llm_key) == concept:
-                    found_val = val_str
-                    break
+        if extracted_dict:
+            for k, v in extracted_dict.items():
+                if v and (k.strip().lower() == excel_header.strip().lower() or classify_header_concept(k) == concept):
+                    val_str = str(v).strip()
+                    if val_str.lower() not in ["none", "null", "n/a", "na"]:
+                        found_val = val_str
+                        break
 
-        # 2. Fallback extraction if LLM value is missing or empty
         if not found_val:
             if concept == "CANDIDATE_NAME":
                 found_val = fallback_data.get("Candidate Name", "")
@@ -327,16 +325,16 @@ RESUME TEXT:
                 found_val = fallback_data.get("Mobile Number", "")
             elif concept == "EMAIL_ADDRESS":
                 found_val = fallback_data.get("Email Address", "")
+            elif concept == "TOTAL_EXPERIENCE":
+                found_val = calc_exp
+            elif concept == "RELEVANT_EXPERIENCE":
+                found_val = calc_exp
             elif concept == "SKILLS":
                 found_val = fallback_data.get("Skills", "")
             elif concept == "NOTICE_PERIOD":
                 found_val = fallback_data.get("Notice Period", "")
-            elif concept == "RELEVANT_EXPERIENCE":
-                found_val = fallback_data.get("Relevant Experience", "")
-            elif concept == "TOTAL_EXPERIENCE":
-                found_val = calc_exp
             elif concept == "PREFERRED_LOCATION":
-                found_val = fallback_data.get("Preferred Location", "") or fallback_data.get("Current Location", "")
+                found_val = fallback_data.get("Preferred Location", "")
             elif concept == "CURRENT_LOCATION":
                 found_val = fallback_data.get("Current Location", "")
             elif concept == "CURRENT_CTC":
@@ -368,10 +366,10 @@ RESUME TEXT:
                 if found_val == curr_ctc_val and not re.search(r"(?:expected|target|desired)\s*(?:ctc|salary|package)", cleaned_text, re.IGNORECASE):
                     found_val = ""
 
-        # Rule: TOTAL_EXPERIENCE must receive only experience values
+        # Rule: TOTAL_EXPERIENCE must receive only experience values and prioritize high-confidence deterministic evaluation
         elif concept == "TOTAL_EXPERIENCE":
             val_lower = found_val.lower()
-            if any(k in val_lower for k in ["lpa", "lakh", "lac", "ctc", "salary", "inr"]) or not found_val:
+            if any(k in val_lower for k in ["lpa", "lakh", "lac", "ctc", "salary", "inr"]) or not found_val or norm_exp.confidence >= 90.0:
                 found_val = calc_exp
 
         # Rule: RELEVANT_EXPERIENCE must receive only experience values
@@ -421,8 +419,11 @@ RESUME TEXT:
     # Attach Debugging & Confidence Metadata
     final_dict["_raw_text"] = resume_text
     final_dict["_cleaned_text"] = cleaned_text
-    final_dict["_exp_confidence"] = exp_conf
-    final_dict["_exp_notes"] = exp_notes
+    final_dict["_exp_confidence"] = norm_exp.confidence
+    final_dict["_exp_notes"] = norm_exp.notes
+    final_dict["_exp_explicit"] = norm_exp.explicit_val or ""
+    final_dict["_exp_calculated"] = norm_exp.calculated_val or ""
+    final_dict["_exp_discrepancy"] = norm_exp.discrepancy_flag
     final_dict["_skills_confidence"] = skills_conf
     final_dict["_tech_domains"] = tech_domains
     final_dict["_exp_bucket"] = exp_bucket

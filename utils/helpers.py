@@ -268,41 +268,32 @@ def classify_experience(exp_input: Any, resume_text: str = "") -> str:
     exp_str = str(exp_input or "").lower().strip()
     resume_lower = resume_text.lower()
 
+    if exp_str == "fresher":
+        return "Fresher"
+
     # Search for numbers in input
     digits = re.findall(r"\d+(?:\.\d+)?", exp_str)
     years = None
     if digits:
         try:
             years = float(digits[0])
+            # If input mentions months e.g. "6 months", "11 months"
+            if "month" in exp_str or "mo" in exp_str:
+                years = round(years / 12.0, 1)
         except ValueError:
             years = None
 
     if years is None:
-        # Try finding in resume text if exp_str is missing or non-numeric
-        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|\-)?\s*(?:years?|yrs?)", resume_lower)
-        if m:
-            try:
-                years = float(m.group(1))
-            except ValueError:
-                pass
-
-    if "fresher" in exp_str or "intern" in exp_str or (years is not None and years == 0):
-        return "Fresher"
-
-    if years is None:
-        if (
-            "fresher" in resume_lower
-            or "entry level" in resume_lower
-            or "student" in resume_lower
-            or "intern" in resume_lower
-            or "internship" in resume_lower
-        ):
+        # Check explicit fresher keyword
+        if any(k in exp_str for k in ["fresher", "fresh graduate", "no work experience"]):
+            return "Fresher"
+        if any(k in resume_lower for k in ["fresher", "fresh graduate", "no work experience"]):
             return "Fresher"
         return "Fresher"
 
-    if years < 1:
+    if years == 0:
         return "Fresher"
-    elif 1 <= years < 3:
+    elif years < 3:
         return "1–3 Years"
     elif 3 <= years < 5:
         return "3–5 Years"

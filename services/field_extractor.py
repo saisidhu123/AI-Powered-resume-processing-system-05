@@ -277,115 +277,22 @@ def parse_month_year(date_str: str) -> Tuple[int, int]:
     return year, month
 
 
+from services.experience_engine import evaluate_total_experience
+
 def calculate_experience_from_dates(resume_text: str) -> Tuple[str, float, str]:
     """
-    Calculate total experience duration from work experience date ranges.
-    Excludes education section dates.
+    Delegate total experience calculation to generic experience engine.
     Returns (formatted_experience, confidence_score, log_notes).
     """
-    if not resume_text:
-        return "Fresher", 0.0, "Resume text is empty."
-
-    resume_lower = resume_text.lower()
-
-    # 1. Check explicit "Total Experience" label
-    m_exp_label = re.search(r"(?:total\s+experience|overall\s+experience|total\s+work\s+experience|years?\s+of\s+experience)\s*[:\-]\s*([^\n\,\.]+)", resume_text, re.IGNORECASE)
-    if m_exp_label:
-        label_val = m_exp_label.group(1).strip()
-        if "fresher" in label_val.lower() or "0 year" in label_val.lower():
-            return "Fresher", 95.0, f"Explicitly mentioned as Fresher in label: '{label_val}'"
-        digits = re.findall(r"\d+(?:\.\d+)?", label_val)
-        if digits:
-            yrs = float(digits[0])
-            if yrs < 60:  # Validate realistic experience years (< 60)
-                if yrs >= 10: formatted = f"{int(yrs)}+ Years"
-                elif yrs.is_integer(): formatted = f"{int(yrs)} Years"
-                else: formatted = f"{yrs} Years"
-                return formatted, 95.0, f"Explicitly extracted from Total Experience label: '{label_val}'"
-
-    # 2. Check fresher keywords
-    if any(k in resume_lower for k in ["fresher", "entry level", "graduate trainee", "student"]):
-        # Check if work experience exists
-        if "work experience" not in resume_lower and "professional experience" not in resume_lower:
-            return "Fresher", 90.0, "Fresher identified based on summary keywords and lack of employment history"
-
-    # 3. Isolate WORK EXPERIENCE section from EDUCATION section
-    lines = resume_text.splitlines()
-    work_lines = []
-    in_work = False
-
-    work_headers = ["work experience", "professional experience", "employment history", "experience"]
-    stop_headers = ["education", "academic background", "projects", "certifications", "skills"]
-
-    for line in lines:
-        ll = line.lower().strip().rstrip(":")
-        if any(ll == h or ll.startswith(h + ":") for h in work_headers):
-            in_work = True
-            continue
-        if in_work and any(ll == h or ll.startswith(h + ":") for h in stop_headers):
-            in_work = False
-            continue
-        if in_work:
-            work_lines.append(line)
-
-    text_to_search = "\n".join(work_lines) if work_lines else resume_text
-
-    # Date range regex: e.g. "Nov 2022 - Present", "2020 - 2022", "01/2021 to 05/2023"
-    date_range_pat = r"((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}[\/\-])?\s*\b(?:19|20)\d{2}\b)\s*(?:--|–|-|to)\s*(present|current|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}[\/\-])?\s*\b(?:19|20)\d{2}\b)"
-    
-    matches = re.findall(date_range_pat, text_to_search, re.IGNORECASE)
-
-    if not matches:
-        return "Fresher", 70.0, "No employment date ranges found; defaulting to Fresher"
-
-    total_months = 0
-    now = datetime.now()
-    log_details = []
-
-    for start_str, end_str in matches:
-        s_year, s_month = parse_month_year(start_str)
-        if not s_year:
-            continue
-
-        if "present" in end_str.lower() or "current" in end_str.lower():
-            e_year, e_month = now.year, now.month
-        else:
-            e_year, e_month = parse_month_year(end_str)
-
-        if not e_year:
-            continue
-
-        # Skip date ranges under education e.g. B.Tech 2022 - 2026 (future end year)
-        if e_year > now.year + 1 or s_year > now.year:
-            continue
-
-        months = (e_year - s_year) * 12 + (e_month - s_month)
-        if 1 <= months <= 480:
-            total_months += months
-            log_details.append(f"{start_str} to {end_str} ({months} mos)")
-
-    if total_months == 0:
-        return "Fresher", 80.0, "No valid employment duration derived from date ranges."
-
-    years_val = round(total_months / 12.0, 1)
-    if years_val < 1.0:
-        formatted = "Fresher"
-    elif years_val >= 10.0:
-        formatted = f"{int(years_val)}+ Years"
-    elif years_val.is_integer():
-        formatted = f"{int(years_val)} Years"
-    else:
-        formatted = f"{years_val} Years"
-
-    log_msg = f"Calculated {years_val} years from employment periods: {'; '.join(log_details)}"
-    return formatted, 90.0, log_msg
+    norm_exp = evaluate_total_experience(resume_text)
+    return norm_exp.display_str, norm_exp.confidence, norm_exp.notes
 
 
 def extract_experience(resume_text: str) -> str:
-    """Extract total experience using calculate_experience_from_dates."""
-    exp_formatted, confidence, log_notes = calculate_experience_from_dates(resume_text)
-    print(f"[EXPERIENCE CALCULATION] Result: {exp_formatted} (Confidence: {confidence}%) - {log_notes}")
-    return exp_formatted
+    """Extract total experience using generic experience engine."""
+    norm_exp = evaluate_total_experience(resume_text)
+    print(f"[EXPERIENCE CALCULATION] Result: {norm_exp.display_str} (Source: {norm_exp.source}, Confidence: {norm_exp.confidence}%) - {norm_exp.notes}")
+    return norm_exp.display_str
 
 
 def extract_email(resume_text: str) -> str:
