@@ -6,25 +6,12 @@ import streamlit as st
 from datetime import datetime
 
 import utils.helpers
-importlib.reload(utils.helpers)
-
 import services.field_extractor
-importlib.reload(services.field_extractor)
-
 import services.resume_parser
-importlib.reload(services.resume_parser)
-
 import services.excel_service
-importlib.reload(services.excel_service)
-
 import services.duplicate_detector
-importlib.reload(services.duplicate_detector)
-
 import services.llm_service
-importlib.reload(services.llm_service)
-
 import services.batch_processor
-importlib.reload(services.batch_processor)
 
 from services.llm_service import check_llm_status, extract_candidate_data, GROQ_MODEL
 from services.resume_parser import parse_resume
