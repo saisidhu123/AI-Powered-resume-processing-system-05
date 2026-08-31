@@ -451,8 +451,11 @@ def calculate_experience_from_dates(resume_text: str) -> Optional[NormalizedExpe
 
 def detect_fresher(resume_text: str) -> Optional[NormalizedExperience]:
     """
-    LEVEL 4: Fresher detection with strong explicit evidence.
-    Must NOT classify candidate as Fresher if they have explicit experience statements or employment history.
+    Detect explicit fresher evidence in resume text.
+    Handles phrases like:
+      - "Fresher", "Fresh Graduate", "Recent Graduate"
+      - "No work experience", "No professional experience"
+      - "Entry-level candidate"
     """
     if not resume_text:
         return None
@@ -465,23 +468,23 @@ def detect_fresher(resume_text: str) -> Optional[NormalizedExperience]:
         r"\brecent\s+graduate\b",
         r"\bno\s+work\s+experience\b",
         r"\bno\s+professional\s+experience\b",
-        r"\bentry\s*level\s+candidate\b"
+        r"\bentry\s*\-?\s*level\s+candidate\b",
+        r"\bentry\s*\-?\s*level\s+software\b",
+        r"\bseeking\s+(?:an?\s+)?entry\s*\-?\s*level\b"
     ]
 
     for pat in fresher_indicators:
-        if re.search(pat, resume_lower):
-            sections = segment_resume_sections(resume_text)
-            work_text = sections.get("work_experience", "")
-            if not work_text or len(work_text.strip()) < 50:
-                return NormalizedExperience(
-                    display_str="Fresher",
-                    numeric_years=0.0,
-                    numeric_months=0,
-                    source="fresher_statement",
-                    confidence=95.0,
-                    notes=f"Fresher identified from explicit indicator: '{pat}'",
-                    explicit_val="Fresher"
-                )
+        m = re.search(pat, resume_lower)
+        if m:
+            return NormalizedExperience(
+                display_str="Fresher",
+                numeric_years=0.0,
+                numeric_months=0,
+                source="fresher_statement",
+                confidence=95.0,
+                notes=f"Fresher identified from explicit indicator: '{m.group(0)}'",
+                explicit_val="Fresher"
+            )
 
     return None
 
@@ -489,10 +492,10 @@ def detect_fresher(resume_text: str) -> Optional[NormalizedExperience]:
 def evaluate_total_experience(resume_text: str) -> NormalizedExperience:
     """
     Master Evaluation Pipeline:
-    LEVEL 1: Explicit professional experience statement
-    LEVEL 2: Date-based employment history calculation (merged & gap-checked)
-    LEVEL 3: Fresher statement (if explicit indicator)
-    LEVEL 4: Safe Fallback ("Not Specified" when history is unparseable)
+    LEVEL 1: Explicit Fresher Statement (Highest priority if present without multi-year work history)
+    LEVEL 2: Explicit professional experience statement (e.g. "5 years of experience")
+    LEVEL 3: Date-based employment history calculation (merged & gap-checked)
+    LEVEL 4: Safe Fallback ("Not Specified" when history is unparseable and NO fresher evidence exists)
     """
     if not resume_text or not resume_text.strip():
         return NormalizedExperience(
@@ -504,13 +507,22 @@ def evaluate_total_experience(resume_text: str) -> NormalizedExperience:
             notes="Empty resume text."
         )
 
-    # 1. Try LEVEL 1: Explicit Experience Extractor
+    # Check for explicit Fresher statement
+    exp_fresher = detect_fresher(resume_text)
+
+    # Try Explicit Experience Extractor
     exp_explicit = extract_explicit_experience(resume_text)
 
-    # 2. Try LEVEL 2: Employment Date Range Calculator
+    # Try Employment Date Range Calculator
     exp_dates = calculate_experience_from_dates(resume_text)
 
-    # 3. Reconcile Level 1 and Level 2
+    # If explicit fresher indicator is present AND there are no date-based multi-year jobs (>1.5 yrs), return Fresher!
+    if exp_fresher:
+        if not exp_dates or exp_dates.numeric_years < 1.5:
+            if not exp_explicit or "fresher" in exp_explicit.display_str.lower():
+                return exp_fresher
+
+    # Reconcile Explicit Statement and Date Calculations
     if exp_explicit and exp_dates:
         diff = abs(exp_explicit.numeric_years - exp_dates.numeric_years)
         discrepancy = diff > 2.0
@@ -532,8 +544,6 @@ def evaluate_total_experience(resume_text: str) -> NormalizedExperience:
     if exp_dates:
         return exp_dates
 
-    # 4. Try LEVEL 4: Fresher Detection
-    exp_fresher = detect_fresher(resume_text)
     if exp_fresher:
         return exp_fresher
 

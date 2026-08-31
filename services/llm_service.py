@@ -11,6 +11,7 @@ from utils.helpers import (
     classify_experience
 )
 from services.experience_engine import evaluate_total_experience
+from services.ctc_extractor import extract_current_and_expected_ctc, sanitize_ctc_pair
 from services.field_extractor import (
     clean_and_reconstruct_text,
     calculate_experience_from_dates,
@@ -194,7 +195,15 @@ CRITICAL INSTRUCTIONS:
    - Do NOT guess mobile numbers, email addresses, notice period, CTC, or experience if not present.
    - NEVER infer total experience from phone numbers, CTC, LPA, notice period, graduation years, or software version numbers (e.g. Java 8, HTML5, Python 3.10).
 
-3. Output format: Respond ONLY with a valid JSON object matching the requested schema keys. Do not include markdown preamble or conversational text.
+3. STRICT CTC SEPARATION RULE:
+   - "Current CTC" means ONLY present/current salary.
+   - "Expected CTC" means ONLY expected/desired salary.
+   - If both appear on the same line (e.g. "Current CTC: 8 LPA | Expected CTC: 11 LPA"), extract them independently!
+   - Current CTC MUST NOT contain "Expected CTC" text, labels, or values.
+   - Expected CTC MUST NOT contain "Current CTC" text, labels, or values.
+   - Never copy lines containing both labels into either field.
+
+4. Output format: Respond ONLY with a valid JSON object matching the requested schema keys. Do not include markdown preamble or conversational text.
 
 RESUME TEXT:
 -------------------
@@ -380,6 +389,25 @@ RESUME TEXT:
 
         final_dict[excel_header] = found_val
 
+    # Step 3.5: Sanitize CTC pair to ensure Current CTC and Expected CTC are strictly independent
+    curr_ctc_hdr = None
+    exp_ctc_hdr = None
+    for h in excel_headers:
+        c_concept = classify_header_concept(h)
+        if c_concept == "CURRENT_CTC":
+            curr_ctc_hdr = h
+        elif c_concept == "EXPECTED_CTC":
+            exp_ctc_hdr = h
+
+    c_val = final_dict.get(curr_ctc_hdr, "") if curr_ctc_hdr else fallback_data.get("Current CTC", "")
+    e_val = final_dict.get(exp_ctc_hdr, "") if exp_ctc_hdr else fallback_data.get("Expected CTC", "")
+
+    san_curr, san_exp = sanitize_ctc_pair(c_val, e_val, cleaned_text)
+    if curr_ctc_hdr:
+        final_dict[curr_ctc_hdr] = san_curr
+    if exp_ctc_hdr:
+        final_dict[exp_ctc_hdr] = san_exp
+
     # Step 4: Normalize extracted skills
     skills_header = None
     for h in excel_headers:
@@ -393,10 +421,15 @@ RESUME TEXT:
     if skills_header and norm_skills_str:
         final_dict[skills_header] = norm_skills_str
 
-    # Step 5: Force computed Experience if header is present and still blank
+    # Step 5: High Confidence Experience & Fresher Protection (Never overwrite deterministic result with "Not Specified")
     for header in excel_headers:
-        if classify_header_concept(header) == "TOTAL_EXPERIENCE" and not final_dict[header]:
-            final_dict[header] = calc_exp
+        c_concept = classify_header_concept(header)
+        if c_concept == "TOTAL_EXPERIENCE":
+            if norm_exp.confidence >= 90.0 or not final_dict.get(header) or final_dict.get(header).strip().lower() in ["not specified", "none", "null", ""]:
+                final_dict[header] = calc_exp
+        elif c_concept == "RELEVANT_EXPERIENCE":
+            if norm_exp.confidence >= 90.0 and (not final_dict.get(header) or final_dict.get(header).strip().lower() in ["not specified", "none", "null", ""]):
+                final_dict[header] = calc_exp
 
     # Step 6: Technology & Experience Classifications
     tech_domains = classify_technology(cleaned_text, norm_skills_str)

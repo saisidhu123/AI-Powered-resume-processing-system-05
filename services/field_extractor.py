@@ -353,50 +353,19 @@ def extract_location(resume_text: str) -> str:
     return ""
 
 
+from services.ctc_extractor import extract_current_and_expected_ctc, sanitize_ctc_pair
+
 def extract_ctc(resume_text: str, ctc_type: str = "current") -> str:
     """
-    Extract CTC figure from resume text.
-    Strictly separates Current CTC from Expected CTC.
-    Never returns experience strings like 'Fresher' or 'X Years'.
+    Extract Current CTC or Expected CTC from resume text.
+    Delegates to deterministic ctc_extractor module to ensure CTC fields are never mixed.
     """
     if not resume_text:
         return ""
-
-    if ctc_type == "expected":
-        exp_pat = r"(?:expected\s+(?:ctc|salary|compensation|package|remuneration)|exp\.?\s+(?:ctc|salary|compensation|package)|target\s+(?:ctc|salary|package)|desired\s+(?:ctc|salary|package))\s*[:\-]?\s*([^\n\,\.]+)"
-        m = re.search(exp_pat, resume_text, re.IGNORECASE)
-        if m:
-            val = m.group(1).strip()
-            # Ensure it is not an experience value or invalid word
-            if not any(k in val.lower() for k in ["fresher", "years", "yrs", "year", "month", "mos"]):
-                return val
-        return ""
-    else:
-        # Current CTC
-        curr_pat = r"(?:current\s+(?:ctc|salary|compensation|package|remuneration)|present\s+(?:ctc|salary|compensation|package|remuneration)|fixed\s+(?:ctc|salary))\s*[:\-]?\s*([^\n\,\.]+)"
-        m = re.search(curr_pat, resume_text, re.IGNORECASE)
-        if m:
-            val = m.group(1).strip()
-            if not any(k in val.lower() for k in ["fresher", "years", "yrs", "year", "month", "mos"]):
-                return val
-
-        # General CTC / Salary label (only if not preceded by expected/target/desired)
-        gen_pat = r"(?<!expected\s)(?<!target\s)(?<!desired\s)\b(?:ctc|salary|annual\s+package)\b\s*[:\-]?\s*([^\n\,\.]+)"
-        m_gen = re.search(gen_pat, resume_text, re.IGNORECASE)
-        if m_gen:
-            val = m_gen.group(1).strip()
-            if not any(k in val.lower() for k in ["fresher", "years", "yrs", "year", "month", "mos"]):
-                return val
-
-        # Standalone LPA search (only as fallback for current CTC if not expected)
-        m_lpa = re.search(r"(\d+(?:\.\d+)?\s*(?:lpa|lakhs?|lac))", resume_text, re.IGNORECASE)
-        if m_lpa:
-            val = m_lpa.group(1).strip()
-            if not any(k in val.lower() for k in ["fresher", "years", "yrs", "year", "month", "mos"]):
-                return val
-
-        return ""
-
+    curr_ctc, exp_ctc = extract_current_and_expected_ctc(resume_text)
+    if ctc_type.lower() == "expected":
+        return exp_ctc
+    return curr_ctc
 
 
 def extract_relevant_experience(resume_text: str, skills_str: str = "") -> str:
